@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oil Smoke Point Visualization</title>
+    <!-- Tailwind CSS CDN for easy styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- D3.js CDN for data visualization -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        /* Apply Inter font and basic styling to the body */
+        body {
+            font-family: 'Inter', sans-serif;
+            @apply bg-gray-100 flex items-center justify-center min-h-screen p-4;
+        }
+        /* Custom styles for SVG elements */
+        .chart-container {
+            @apply bg-white shadow-lg rounded-xl p-6 md:p-8 w-full max-w-4xl overflow-hidden;
+        }
+        .bar {
+            @apply fill-blue-500 hover:fill-blue-600 transition-colors duration-200;
+        }
+        .axis-label {
+            @apply text-gray-700 text-sm font-medium;
+        }
+        .tick text {
+            @apply text-gray-600 text-xs;
+        }
+        .tick line {
+            @apply stroke-gray-300;
+        }
+        .domain {
+            @apply stroke-gray-400;
+        }
+        .tooltip {
+            @apply absolute bg-gray-800 text-white text-xs px-2 py-1 rounded-md pointer-events-none opacity-0 transition-opacity duration-200;
+        }
+        .gemini-response {
+            @apply mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200 text-blue-800;
+            min-height: 100px; /* Ensure it has some visible height */
+        }
+        .loading-text {
+            @apply text-center text-blue-600 mt-2;
+        }
+        /* Style for the fixed smoke point marker */
+        .fixed-point-marker {
+            fill: #ef4444; /* A distinct red color for the marker */
+            cursor: pointer; /* Indicate it's clickable */
+            stroke: #dc2626;
+            stroke-width: 1.5px;
+        }
+        /* Style for separator lines */
+        .separator-line {
+            stroke: #e2e8f0; /* Light gray stroke */
+            stroke-width: 1px;
+            stroke-dasharray: 2 2; /* Dashed line for subtle separation */
+        }
+    </style>
+</head>
+<body>
+    <div class="mb-6">
+        <div class="flex items-center bg-blue-100 border-l-4 border-blue-500 p-4 rounded shadow-sm">
+            <span class="mr-2 text-blue-600 text-xl">ℹ️</span>
+            <div>
+                <span class="ml-2">本頁展示常見食用油的發煙點，並可根據烹飪方式或油品獲取建議與食譜。 - Created by <a href='https://g.co/gemini/share/f0f48340e5bc' target="_blank" style="color:blue">Google Gemini 2.5 Flash June 13, 2025 at 12:31 PM</a></span>
+            </div>
+        </div>
+    </div>
+    <div class="chart-container">
+        <h1 class="text-xl md:text-2xl font-bold text-center mb-6 text-gray-800">油品發煙點比較 (Oil Smoke Point Comparison)</h1>
+        <div id="chart">
+            <!-- D3.js chart will be rendered here -->
+        </div>
+
+        <!-- Cooking Suggestions Section -->
+        <div class="mt-8 pt-6 border-t border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-700 mb-4">✨ 烹飪建議 (Cooking Suggestions) ✨</h2>
+            <div class="flex flex-col sm:flex-row items-center gap-4">
+                <input type="text" id="cookingMethodInput" placeholder="輸入烹飪方式 (例如：炒菜、油炸) 或選擇油品"
+                       class="flex-grow p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 shadow-sm text-gray-700">
+                <button id="getCookingSuggestionBtn"
+                        class="px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors duration-200 shadow-md">
+                    獲取建議 (Get Suggestion)
+                </button>
+            </div>
+            <div id="geminiResponseCooking" class="gemini-response mt-4">
+                <p class="text-gray-500 text-center">請輸入烹飪方式或點擊油品獲取建議...</p>
+            </div>
+            <div id="loadingIndicatorCooking" class="hidden loading-text">
+                生成中，請稍候... (Generating, please wait...)
+            </div>
+        </div>
+
+        <!-- Recipe Generation Section -->
+        <div class="mt-8 pt-6 border-t border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-700 mb-4">✨ 食譜生成 (Recipe Generation) ✨</h2>
+            <p class="mb-2 text-gray-600">已選油品 (Selected Oil): <span id="selectedOilDisplay" class="font-bold text-blue-700">無 (None)</span></p>
+            <div class="flex flex-col gap-4">
+                <input type="text" id="ingredientsInput" placeholder="輸入其他食材 (例如：雞肉, 蔬菜, 蒜頭)"
+                       class="p-3 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 shadow-sm text-gray-700">
+                <button id="generateRecipeBtn"
+                        class="px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-colors duration-200 shadow-md">
+                    生成食譜 (Generate Recipe)
+                </button>
+            </div>
+            <div id="geminiResponseRecipe" class="gemini-response mt-4">
+                <p class="text-gray-500 text-center">請選擇油品並輸入食材來生成食譜...</p>
+            </div>
+            <div id="loadingIndicatorRecipe" class="hidden loading-text">
+                生成中，請稍候... (Generating, please wait...)
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Data for oil smoke points
+        const oilData = [
+            { name: "苦茶油", englishName: "Bitter Tea Oil", min: 200, max: 252 },
+            { name: "橄欖油", englishName: "Olive Oil", min: 230, max: 230 },
+            { name: "葵花油", englishName: "Sunflower Oil", min: 227, max: 227 },
+            { name: "冷壓初榨橄欖油", englishName: "Cold-Pressed EVOO", min: 190, max: 207 },
+            { name: "初榨芝麻油", englishName: "Virgin Sesame Oil", min: 177, max: 210 },
+            { name: "豬油", englishName: "Lard", min: 188, max: 188 },
+            { name: "大豆油", englishName: "Soybean Oil", min: 177, max: 177 },
+            { name: "奶油", englishName: "Butter", min: 175, max: 175 },
+            { name: "南瓜籽油", englishName: "Pumpkin Seed Oil", min: 160, max: 181 },
+            { name: "奇亞籽油", englishName: "Chia Seed Oil", min: 107, max: 107 },
+            { name: "亞麻仁油", englishName: "Flaxseed Oil", min: 107, max: 107 }
+        ];
+
+        // Sort data by the maximum smoke point in ascending order for better readability
+        oilData.sort((a, b) => a.max - b.max);
+
+        let currentSelectedOil = null; // Variable to store the currently selected oil object
+
+        // Function to draw the chart
+        function drawChart() {
+            // Clear any existing SVG to prevent duplicates on resize
+            d3.select("#chart").html("");
+
+            // Set up dimensions and margins for the SVG
+            const containerWidth = document.getElementById('chart').clientWidth;
+            const margin = { top: 20, right: 30, bottom: 60, left: 150 }; // Increased left margin for labels
+            const width = containerWidth - margin.left - margin.right;
+            const height = oilData.length * 30 + margin.top + margin.bottom; // Adjust height based on number of items
+
+            // Append SVG to the #chart div
+            const svg = d3.select("#chart")
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height)
+                .append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+
+            // Create X scale (linear scale for temperature)
+            const x = d3.scaleLinear()
+                .domain([d3.min(oilData, d => d.min) - 10, d3.max(oilData, d => d.max) + 10]) // Add padding to domain
+                .range([0, width]);
+
+            // Create Y scale (band scale for oil names)
+            const y = d3.scaleBand()
+                .domain(oilData.map(d => d.name))
+                .range([0, height - margin.top - margin.bottom])
+                .padding(0.3); // Padding between bars
+
+            // Append X axis
+            svg.append("g")
+                .attr("transform", `translate(0,${height - margin.top - margin.bottom})`)
+                .call(d3.axisBottom(x).ticks(5)) // Show 5 ticks on x-axis
+                .selectAll("text")
+                .attr("class", "tick text-xs")
+                .style("text-anchor", "middle");
+
+            // X-axis label
+            svg.append("text")
+                .attr("class", "axis-label")
+                .attr("x", width / 2)
+                .attr("y", height - margin.bottom + 40)
+                .attr("text-anchor", "middle")
+                .text("發煙點 (°C) / Smoke Point (°C)");
+
+            // Append Y axis
+            svg.append("g")
+                .call(d3.axisLeft(y))
+                .selectAll("text")
+                .attr("class", "tick text-sm")
+                .attr("dy", ".35em") // Adjust vertical alignment
+                .style("text-anchor", "end");
+
+            // Y-axis label
+            svg.append("text")
+                .attr("class", "axis-label")
+                .attr("transform", "rotate(-90)")
+                .attr("y", -margin.left + 20)
+                .attr("x", -(height - margin.top - margin.bottom) / 2)
+                .attr("text-anchor", "middle")
+                .text("油品種類 / Oil Type");
+
+            // Add bars for each oil
+            svg.selectAll(".bar")
+                .data(oilData)
+                .enter()
+                .append("rect")
+                .attr("class", "bar rounded") // Apply rounded corners using Tailwind
+                .attr("y", d => y(d.name))
+                .attr("x", d => x(d.min))
+                .attr("height", y.bandwidth())
+                .attr("width", d => x(d.max) - x(d.min))
+                .on("mouseover", function(event, d) {
+                    // Show tooltip on hover
+                    d3.select(this).attr("fill", "#3b82f6"); // Change color on hover
+                    tooltip.transition()
+                        .duration(200)
+                        .style("opacity", .9);
+                    tooltip.html(`
+                        <strong>${d.name} (${d.englishName})</strong><br/>
+                        ${d.min === d.max ? `${d.min}°C` : `${d.min}°C - ${d.max}°C`}
+                    `)
+                    .style("left", (event.pageX + 10) + "px")
+                    .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function(event, d) {
+                    // Hide tooltip on mouse out
+                    d3.select(this).attr("fill", "#3b82f0"); // Revert color
+                    tooltip.transition()
+                        .duration(500)
+                        .style("opacity", 0);
+                })
+                .on("click", function(event, d) {
+                    // Set the selected oil for both features
+                    currentSelectedOil = d;
+                    document.getElementById('cookingMethodInput').value = `${d.name} (${d.min}~${d.max}°C)`;
+                    document.getElementById('selectedOilDisplay').textContent = `${d.name} (${d.min}~${d.max}°C)`;
+                    getCookingSuggestion(); // Also trigger cooking suggestion for consistency
+                });
+
+            // Add circles for oils with fixed smoke points (min === max)
+            svg.selectAll(".fixed-point-marker")
+                .data(oilData.filter(d => d.min === d.max)) // Filter only oils with fixed smoke points
+                .enter()
+                .append("circle")
+                .attr("class", "fixed-point-marker")
+                .attr("cx", d => x(d.min)) // Center the circle at the smoke point
+                .attr("cy", d => y(d.name) + y.bandwidth() / 2) // Center the circle vertically within the bar
+                .attr("r", 7) // Radius of the circle
+                .on("click", function(event, d) {
+                    // Replicate the bar's click logic for the circle
+                    currentSelectedOil = d;
+                    document.getElementById('cookingMethodInput').value = `${d.name} (${d.min}~${d.max}°C)`;
+                    document.getElementById('selectedOilDisplay').textContent = `${d.name} (${d.min}~${d.max}°C)`;
+                    getCookingSuggestion(); // Also trigger cooking suggestion for consistency
+                })
+                .on("mouseover", function(event, d) {
+                    // Show tooltip on hover, similar to bars
+                    d3.select(this).attr("r", 9); // Enlarge on hover
+                    tooltip.transition()
+                        .duration(200)
+                        .style("opacity", .9);
+                    tooltip.html(`
+                        <strong>${d.name} (${d.englishName})</strong><br/>
+                        ${d.min === d.max ? `${d.min}°C` : `${d.min}°C - ${d.max}°C`}
+                    `)
+                    .style("left", (event.pageX + 10) + "px")
+                    .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function(event, d) {
+                    // Hide tooltip on mouse out, revert size
+                    d3.select(this).attr("r", 7);
+                    tooltip.transition()
+                        .duration(500)
+                        .style("opacity", 0);
+                });
+
+            // Add horizontal separator lines for each oil
+            svg.selectAll(".separator-line")
+                .data(oilData)
+                .enter()
+                .append("line")
+                .attr("class", "separator-line")
+                .attr("x1", 0) // Start from the beginning of the chart area
+                .attr("x2", width) // Extend to the end of the chart area
+                .attr("y1", d => y(d.name) + y.bandwidth()) // Position at the bottom of each band
+                .attr("y2", d => y(d.name) + y.bandwidth())
+                .attr("stroke", "#e2e8f0") // Light gray stroke
+                .attr("stroke-width", 1)
+                .attr("stroke-dasharray", "2 2"); // Dashed line for subtle separation
+
+
+            // Add text labels for smoke points next to the bars
+            svg.selectAll(".bar-label")
+                .data(oilData)
+                .enter()
+                .append("text")
+                .attr("class", "bar-label text-xs font-medium text-gray-800")
+                .attr("x", d => x(d.max) + 5) // Position label to the right of the bar
+                .attr("y", d => y(d.name) + y.bandwidth() / 2)
+                .attr("dy", "0.35em") // Vertically align text
+                .text(d => d.min === d.max ? `${d.min}°C` : `${d.min}~${d.max}°C`);
+
+            // Create a tooltip div (initially hidden)
+            const tooltip = d3.select("body").append("div")
+                .attr("class", "tooltip")
+                .style("opacity", 0);
+        }
+
+        // Function to call Gemini API for cooking suggestions
+        async function getCookingSuggestion() {
+            const cookingMethodInput = document.getElementById('cookingMethodInput');
+            const geminiResponseDiv = document.getElementById('geminiResponseCooking');
+            const loadingIndicator = document.getElementById('loadingIndicatorCooking');
+            let prompt = "";
+
+            if (currentSelectedOil && cookingMethodInput.value.includes(currentSelectedOil.name)) {
+                // If an oil is selected by clicking, generate a prompt based on that oil
+                prompt = `請根據 ${currentSelectedOil.name} (發煙點 ${currentSelectedOil.min}~${currentSelectedOil.max}°C) 這種油的特性，推薦適合的烹飪方法和一個簡單的食譜，並說明其適用於這種油的原因。請使用中文繁體字。
+回應中請使用簡單的段落換行，條列式資訊請使用 '-' 或數字開頭，不要使用粗體、斜體等 Markdown 語法，也不要使用 \`\`\` 包裹程式碼區塊。`;
+            } else if (cookingMethodInput.value.trim() !== "") {
+                // If user typed a cooking method, generate a prompt based on that
+                const userQuery = cookingMethodInput.value.trim();
+                const oilDataString = oilData.map(o => `${o.name} (${o.min}~${o.max}°C)`).join(", ");
+                prompt = `請根據以下油品的發煙點資訊：[${oilDataString}]，並考量用戶輸入的烹飪方式："${userQuery}"，推薦最適合的油品和一個簡短的食譜或烹飪建議。請使用中文繁體字。
+回應中請使用簡單的段落換行，條列式資訊請使用 '-' 或數字開頭，不要使用粗體、斜體等 Markdown 語法，也不要使用 \`\`\` 包裹程式碼區塊。`;
+            } else {
+                geminiResponseDiv.innerHTML = `<p class="text-red-500 text-center">請輸入烹飪方式或點擊圖表中的油品。</p>`;
+                return;
+            }
+
+            loadingIndicator.classList.remove('hidden'); // Show loading indicator
+            geminiResponseDiv.innerHTML = ""; // Clear previous response
+
+            try {
+                let chatHistory = [];
+                chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                const payload = { contents: chatHistory };
+                const apiKey = ""; // If you want to use models other than gemini-2.0-flash or imagen-3.0-generate-002, provide an API key here. Otherwise, leave this as-is.
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    geminiResponseDiv.innerHTML = `<p>${text.replace(/\n/g, '<br/>')}</p>`; // Display the response, replace newlines with <br/>
+                } else {
+                    geminiResponseDiv.innerHTML = `<p class="text-red-500 text-center">未能獲取建議。請稍後再試。</p>`;
+                    console.error("Gemini API response structure unexpected:", result);
+                }
+            } catch (error) {
+                geminiResponseDiv.innerHTML = `<p class="text-red-500 text-center">發生錯誤，無法獲取建議。請檢查網路連線或稍後再試。</p>`;
+                console.error("Error calling Gemini API:", error);
+            } finally {
+                loadingIndicator.classList.add('hidden'); // Hide loading indicator
+            }
+        }
+
+        // Function to call Gemini API for recipe generation
+        async function generateRecipe() {
+            const ingredientsInput = document.getElementById('ingredientsInput');
+            const geminiResponseDiv = document.getElementById('geminiResponseRecipe');
+            const loadingIndicator = document.getElementById('loadingIndicatorRecipe');
+            let prompt = "";
+
+            const selectedOilName = currentSelectedOil ? currentSelectedOil.name : '未選擇油品';
+            const selectedOilSmokePoint = currentSelectedOil ? `(發煙點 ${currentSelectedOil.min}~${currentSelectedOil.max}°C)` : '';
+            const userIngredients = ingredientsInput.value.trim();
+
+            if (!currentSelectedOil && userIngredients === "") {
+                geminiResponseDiv.innerHTML = `<p class="text-red-500 text-center">請選擇油品或輸入食材。</p>`;
+                return;
+            }
+
+            if (currentSelectedOil && userIngredients !== "") {
+                prompt = `請根據油品 ${selectedOilName} ${selectedOilSmokePoint} 以及提供的材料 "${userIngredients}"，生成一個適合此油品特性和材料的食譜，並說明烹飪步驟。請使用中文繁體字。
+回應中請使用簡單的段落換行，條列式資訊請使用 '-' 或數字開頭，不要使用粗體、斜體等 Markdown 語法，也不要使用 \`\`\` 包裹程式碼區塊。`;
+            } else if (currentSelectedOil) {
+                prompt = `請根據油品 ${selectedOilName} ${selectedOilSmokePoint} 的特性，生成一個適合這種油的食譜，並說明烹飪步驟。請使用中文繁體字。
+回應中請使用簡單的段落換行，條列式資訊請使用 '-' 或數字開頭，不要使用粗體、斜體等 Markdown 語法，也不要使用 \`\`\` 包裹程式碼區塊。`;
+            } else if (userIngredients !== "") {
+                const oilDataString = oilData.map(o => `${o.name} (${o.min}~${o.max}°C)`).join(", ");
+                prompt = `請根據以下油品的發煙點資訊：[${oilDataString}]，以及您提供的材料 "${userIngredients}"，推薦最適合的油品並生成一個食譜，說明烹飪步驟。請使用中文繁體字。
+回應中請使用簡單的段落換行，條列式資訊請使用 '-' 或數字開頭，不要使用粗體、斜體等 Markdown 語法，也不要使用 \`\`\` 包裹程式碼區塊。`;
+            }
+
+
+            loadingIndicator.classList.remove('hidden'); // Show loading indicator
+            geminiResponseDiv.innerHTML = ""; // Clear previous response
+
+            try {
+                let chatHistory = [];
+                chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                const payload = { contents: chatHistory };
+                const apiKey = ""; // If you want to use models other than gemini-2.0-flash or imagen-3.0-generate-002, provide an API key here. Otherwise, leave this as-is.
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    geminiResponseDiv.innerHTML = `<p>${text.replace(/\n/g, '<br/>')}</p>`; // Display the response, replace newlines with <br/>
+                } else {
+                    geminiResponseDiv.innerHTML = `<p class="text-red-500 text-center">未能生成食譜。請稍後再試。</p>`;
+                    console.error("Gemini API response structure unexpected:", result);
+                }
+            } catch (error) {
+                geminiResponseDiv.innerHTML = `<p class="text-red-500 text-center">發生錯誤，無法生成食譜。請檢查網路連線或稍後再試。</p>`;
+                console.error("Error calling Gemini API for recipe:", error);
+            } finally {
+                loadingIndicator.classList.add('hidden'); // Hide loading indicator
+            }
+        }
+
+        // Event listener for the "Get Suggestion" button
+        document.getElementById('getCookingSuggestionBtn').addEventListener('click', getCookingSuggestion);
+
+        // Event listener for the "Generate Recipe" button
+        document.getElementById('generateRecipeBtn').addEventListener('click', generateRecipe);
+
+        // Initial chart drawing on window load
+        window.onload = drawChart;
+
+        // Redraw chart on window resize for responsiveness
+        window.addEventListener('resize', drawChart);
+    </script>
+</body>
+</html>
+<!-- This HTML file visualizes the smoke points of various cooking oils using D3.js and Tailwind CSS. It includes features for cooking suggestions and recipe generation based on user input. -->
